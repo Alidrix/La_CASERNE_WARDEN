@@ -44,7 +44,7 @@ admin_user   = "ops"
 
 # Requis (pas de valeur par défaut dans variables.tf)
 base_image_path = "/var/lib/libvirt/images/ubuntu-22.04-server-cloudimg-amd64.img"
-ssh_public_key  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host"
+ssh_public_key  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEwbw7flATYP9whquQzKA9oHA7OerC2fLtJiWMOyFdOh lab-bitwarden"
 
 # Optionnel (surcharges de defaults utiles en lab)
 # libvirt_uri   = "qemu:///system"

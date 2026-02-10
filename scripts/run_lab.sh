@@ -119,8 +119,12 @@ for p in glob.glob('ansible/*.yml') + glob.glob('compose/*.yml'):
 print('[OK] YAML valide (ansible + compose)')
 PY
 
-  if docker run --rm -v "${TF_DIR}:/workspace" -w /workspace "$TERRAFORM_IMAGE" fmt -check -recursive >/dev/null 2>&1; then
+  local fmt_status=0
+  docker run --rm -v "${TF_DIR}:/workspace" -w /workspace "$TERRAFORM_IMAGE" fmt -check -recursive >/dev/null 2>&1 || fmt_status=$?
+  if [[ $fmt_status -eq 0 ]]; then
     echo "[OK] Terraform fmt valide via conteneur ${TERRAFORM_IMAGE}."
+  fi
+  if [[ $fmt_status -ne 0 ]]; then
   else
     echo "[WARN] Terraform fmt non validé via conteneur (image absente, réseau indisponible, démon Docker indisponible ou format à corriger)."
   fi
@@ -185,6 +189,13 @@ run_all() {
 
   if ! has_cmd docker; then
     echo "[WARN] docker absent: étape terraform ignorée. Utilisez ./scripts/run_lab.sh terraform après installation de Docker."
+  fi
+  if has_cmd docker && [[ ! -f "$TFVARS_FILE" ]]; then
+    echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (copiez terraform/terraform.tfvars.example vers terraform/terraform.tfvars, puis adaptez les valeurs)."
+  fi
+  if has_cmd docker && [[ -f "$TFVARS_FILE" ]]; then
+    run_terraform
+  fi
   elif [[ ! -f "$TFVARS_FILE" ]]; then
     echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (copiez terraform/terraform.tfvars.example vers terraform/terraform.tfvars, puis adaptez les valeurs)."
   else
@@ -200,6 +211,16 @@ run_all() {
   fi
 }
 
+  if ! has_cmd docker; then
+    echo "[WARN] docker absent: étape ansible ignorée. Utilisez ./scripts/run_lab.sh ansible après installation de Docker."
+  fi
+  if has_cmd docker && [[ ! -f "$INVENTORY_FILE" ]]; then
+    echo "[WARN] inventory Ansible introuvable: ${INVENTORY_FILE}. Étape ansible ignorée (utilisez INVENTORY_FILE=/chemin/fichier ou créez le fichier)."
+  fi
+  if has_cmd docker && [[ -f "$INVENTORY_FILE" ]]; then
+    run_ansible
+  fi
+}
 main() {
   local command="${1:-all}"
 
