@@ -131,10 +131,6 @@ PY
 }
 
 run_terraform() {
-
-}
-
-run_terraform() {
   require_cmd terraform
   [[ -f "$TFVARS_FILE" ]] || {
     echo "[ERREUR] terraform.tfvars introuvable: $TFVARS_FILE" >&2
