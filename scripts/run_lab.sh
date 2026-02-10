@@ -58,6 +58,55 @@ has_libvirt_socket() {
   [[ -S "$LIBVIRT_SOCK" ]]
 }
 
+validate_inventory_groups() {
+  local inventory_path="$1"
+
+  python3 - "$inventory_path" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+required_groups = ["bitwarden_nodes", "mssql_nodes", "mssql_primary", "reverse_proxy"]
+group_hosts = {g: 0 for g in required_groups}
+
+inventory = Path(sys.argv[1])
+if not inventory.exists():
+    print(f"[ERREUR] Inventory Ansible introuvable: {inventory}", file=sys.stderr)
+    sys.exit(1)
+
+current_group = None
+for raw_line in inventory.read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        continue
+
+    section = re.match(r"^\[(.+)\]$", line)
+    if section:
+        name = section.group(1)
+        current_group = name if name in group_hosts else None
+        continue
+
+    if current_group:
+        group_hosts[current_group] += 1
+
+missing = [g for g, count in group_hosts.items() if count == 0]
+if missing:
+    print(
+        "[ERREUR] Inventory Ansible invalide: groupes manquants ou vides "
+        + ", ".join(missing)
+        + ".",
+        file=sys.stderr,
+    )
+    print(
+        "         Copiez inventory.ini.example vers inventory.ini puis adaptez les IP/variables.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+print("[OK] Inventory Ansible valide.")
+PY
+}
+
 require_libvirt_socket() {
   has_libvirt_socket || {
     echo "[ERREUR] Socket libvirt introuvable: ${LIBVIRT_SOCK}." >&2
@@ -176,10 +225,13 @@ run_terraform() {
 
 run_ansible() {
   require_cmd docker
+  require_cmd python3
   [[ -f "$INVENTORY_FILE" ]] || {
     echo "[ERREUR] Inventory Ansible introuvable: $INVENTORY_FILE" >&2
     exit 1
   }
+
+  validate_inventory_groups "$INVENTORY_FILE"
 
   local inventory_in_container inventory_dir inventory_base
   inventory_dir="$(dirname "$INVENTORY_FILE")"

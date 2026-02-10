@@ -71,7 +71,11 @@ Préparer les fichiers d'entrée avant `all`:
 ```bash
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 ```
-2. Créer/renseigner `inventory.ini` à la racine (ou définir `INVENTORY_FILE=/chemin/inventory.ini`).
+2. Copier et adapter l'inventaire Ansible:
+```bash
+cp inventory.ini.example inventory.ini
+```
+(ou définir `INVENTORY_FILE=/chemin/inventory.ini`).
 3. Lancer le flux complet:
 ```bash
 ./scripts/run_lab.sh all
