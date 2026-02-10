@@ -59,6 +59,16 @@ has_libvirt_socket() {
 }
 
 validate_inventory_groups() {
+  local inventory_file="${1:-}"
+  [[ -n "$inventory_file" ]] || {
+    echo "[ERREUR] validate_inventory_groups: chemin inventory manquant." >&2
+    exit 1
+  }
+
+  local inventory_dir inventory_base inventory_in_container
+  inventory_dir="$(dirname "$inventory_file")"
+  inventory_base="$(basename "$inventory_file")"
+  inventory_in_container="/workspace/${inventory_base}"
   local inventory_in_container="$1"
   local inventory_dir="$2"
 
@@ -274,6 +284,7 @@ run_ansible() {
   inventory_base="$(basename "$INVENTORY_FILE")"
   inventory_in_container="/workspace/${inventory_base}"
 
+  validate_inventory_groups "$INVENTORY_FILE"
   validate_inventory_groups "$inventory_in_container" "$inventory_dir"
 
   echo "[INFO] Ansible via Docker image: ${ANSIBLE_IMAGE}"
