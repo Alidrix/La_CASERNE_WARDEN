@@ -19,6 +19,7 @@ Commands:
   validate   Vérifie les prérequis et la politique des identifiants BDD
   terraform  Exécute terraform init/plan/apply
   ansible    Exécute les playbooks Ansible dans l'ordre
+  all        validate + terraform + ansible (défaut, saute les étapes si prérequis/fichiers absents)
   all        validate + terraform + ansible (défaut)
 
 Variables attendues (env):
@@ -198,12 +199,22 @@ main() {
     all)
       run_validate
       if has_cmd docker; then
+        if [[ -f "$TFVARS_FILE" ]]; then
+          run_terraform
+        else
+          echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (utilisez TFVARS_FILE=/chemin/fichier ou créez le fichier)."
+        fi
         run_terraform
       else
         echo "[WARN] docker absent: étape terraform ignorée. Utilisez ./scripts/run_lab.sh terraform après installation de Docker."
       fi
 
       if has_cmd docker; then
+        if [[ -f "$INVENTORY_FILE" ]]; then
+          run_ansible
+        else
+          echo "[WARN] inventory Ansible introuvable: ${INVENTORY_FILE}. Étape ansible ignorée (utilisez INVENTORY_FILE=/chemin/fichier ou créez le fichier)."
+        fi
         run_ansible
       else
         echo "[WARN] docker absent: étape ansible ignorée. Utilisez ./scripts/run_lab.sh ansible après installation de Docker."
