@@ -181,27 +181,36 @@ run_ansible() {
     exit 1
   }
 
+  local inventory_in_container inventory_dir inventory_base
+  inventory_dir="$(dirname "$INVENTORY_FILE")"
+  inventory_base="$(basename "$INVENTORY_FILE")"
+  inventory_in_container="/workspace/${inventory_base}"
+
   echo "[INFO] Ansible via Docker image: ${ANSIBLE_IMAGE}"
 
   docker run --rm -it \
-    -v "${ROOT_DIR}:/workspace" \
-    -w /workspace \
-    "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/setup_docker.yml"
+    -v "${inventory_dir}:/workspace:ro" \
+    -v "${ANSIBLE_DIR}:/ansible:ro" \
+    -w /ansible \
+    "$ANSIBLE_IMAGE" ansible-playbook -i "$inventory_in_container" /ansible/setup_docker.yml
 
   docker run --rm -it \
-    -v "${ROOT_DIR}:/workspace" \
-    -w /workspace \
-    "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/config_db_replication.yml"
+    -v "${inventory_dir}:/workspace:ro" \
+    -v "${ANSIBLE_DIR}:/ansible:ro" \
+    -w /ansible \
+    "$ANSIBLE_IMAGE" ansible-playbook -i "$inventory_in_container" /ansible/config_db_replication.yml
 
   docker run --rm -it \
-    -v "${ROOT_DIR}:/workspace" \
-    -w /workspace \
-    "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/deploy_bitwarden.yml"
+    -v "${inventory_dir}:/workspace:ro" \
+    -v "${ANSIBLE_DIR}:/ansible:ro" \
+    -w /ansible \
+    "$ANSIBLE_IMAGE" ansible-playbook -i "$inventory_in_container" /ansible/deploy_bitwarden.yml
 
   docker run --rm -it \
-    -v "${ROOT_DIR}:/workspace" \
-    -w /workspace \
-    "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/configure_proxy.yml"
+    -v "${inventory_dir}:/workspace:ro" \
+    -v "${ANSIBLE_DIR}:/ansible:ro" \
+    -w /ansible \
+    "$ANSIBLE_IMAGE" ansible-playbook -i "$inventory_in_container" /ansible/configure_proxy.yml
 }
 
 run_all() {
