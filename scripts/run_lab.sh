@@ -77,14 +77,20 @@ validate_inventory_groups() {
     exit 1
   fi
 
-  python3 - <<'PY' <<<"$inventory_json"
+  INVENTORY_JSON="$inventory_json" python3 - <<'PY'
 import json
+import os
 import sys
 
 required_groups = ["bitwarden_nodes", "mssql_nodes", "mssql_primary", "reverse_proxy"]
+raw = os.environ.get("INVENTORY_JSON", "")
+json_start = raw.find("{")
+if json_start == -1:
+    print("[ERREUR] Sortie ansible-inventory invalide: JSON introuvable.", file=sys.stderr)
+    sys.exit(1)
 
 try:
-    data = json.load(sys.stdin)
+    data = json.loads(raw[json_start:])
 except Exception as exc:
     print(f"[ERREUR] Sortie ansible-inventory invalide (JSON): {exc}", file=sys.stderr)
     sys.exit(1)
