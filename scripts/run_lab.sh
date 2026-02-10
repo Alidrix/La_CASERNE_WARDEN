@@ -31,8 +31,8 @@ Variables attendues (env):
   BW_DB_PASSWORD
 
 Variables optionnelles:
-  INVENTORY_FILE=/chemin/inventory.ini
-  TFVARS_FILE=/chemin/terraform.tfvars
+  INVENTORY_FILE=/home/sisu/workspace/LA_CASERNE_WARDEN/La_CASERNE_WARDEN-main/inventory.ini
+  TFVARS_FILE=/home/sisu/workspace/LA_CASERNE_WARDEN/La_CASERNE_WARDEN-main/terraform/terraform.tfvars
   TERRAFORM_IMAGE=hashicorp/terraform:1.14.4
   ANSIBLE_IMAGE=cytopia/ansible:latest-tools
   LIBVIRT_SOCK=/var/run/libvirt/libvirt-sock
@@ -69,6 +69,8 @@ validate_inventory_groups() {
   inventory_dir="$(dirname "$inventory_file")"
   inventory_base="$(basename "$inventory_file")"
   inventory_in_container="/workspace/${inventory_base}"
+  local inventory_in_container="$1"
+  local inventory_dir="$2"
 
   local inventory_json
   if ! inventory_json="$({
@@ -102,6 +104,40 @@ for group in required_groups:
 if missing:
     print(
         "[ERREUR] Inventory Ansible invalide pour ansible-playbook: groupes manquants ou vides "
+  local inventory_path="$1"
+
+  python3 - "$inventory_path" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+required_groups = ["bitwarden_nodes", "mssql_nodes", "mssql_primary", "reverse_proxy"]
+group_hosts = {g: 0 for g in required_groups}
+
+inventory = Path(sys.argv[1])
+if not inventory.exists():
+    print(f"[ERREUR] Inventory Ansible introuvable: {inventory}", file=sys.stderr)
+    sys.exit(1)
+
+current_group = None
+for raw_line in inventory.read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        continue
+
+    section = re.match(r"^\[(.+)\]$", line)
+    if section:
+        name = section.group(1)
+        current_group = name if name in group_hosts else None
+        continue
+
+    if current_group:
+        group_hosts[current_group] += 1
+
+missing = [g for g, count in group_hosts.items() if count == 0]
+if missing:
+    print(
+        "[ERREUR] Inventory Ansible invalide: groupes manquants ou vides "
         + ", ".join(missing)
         + ".",
         file=sys.stderr,
@@ -113,6 +149,7 @@ if missing:
     sys.exit(1)
 
 print("[OK] Inventory Ansible valide (ansible-inventory).")
+print("[OK] Inventory Ansible valide.")
 PY
 }
 
@@ -240,12 +277,15 @@ run_ansible() {
     exit 1
   }
 
+  validate_inventory_groups "$INVENTORY_FILE"
+
   local inventory_in_container inventory_dir inventory_base
   inventory_dir="$(dirname "$INVENTORY_FILE")"
   inventory_base="$(basename "$INVENTORY_FILE")"
   inventory_in_container="/workspace/${inventory_base}"
 
   validate_inventory_groups "$INVENTORY_FILE"
+  validate_inventory_groups "$inventory_in_container" "$inventory_dir"
 
   echo "[INFO] Ansible via Docker image: ${ANSIBLE_IMAGE}"
 
