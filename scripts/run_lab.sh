@@ -31,8 +31,8 @@ Variables attendues (env):
   BW_DB_PASSWORD
 
 Variables optionnelles:
-  INVENTORY_FILE=/chemin/inventory.ini
-  TFVARS_FILE=/chemin/terraform.tfvars
+  INVENTORY_FILE=/home/sisu/workspace/LA_CASERNE_WARDEN/La_CASERNE_WARDEN-main/inventory.ini
+  TFVARS_FILE=/home/sisu/workspace/LA_CASERNE_WARDEN/La_CASERNE_WARDEN-main/terraform/terraform.tfvars
   TERRAFORM_IMAGE=hashicorp/terraform:1.14.4
   ANSIBLE_IMAGE=cytopia/ansible:latest-tools
   LIBVIRT_SOCK=/var/run/libvirt/libvirt-sock
