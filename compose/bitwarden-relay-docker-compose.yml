@@ -1,0 +1,47 @@
+# Template LAB Bitwarden relay / DR warm standby.
+services:
+  bitwarden-web:
+    image: bitwarden/web:latest
+    restart: unless-stopped
+    environment:
+      BW_DOMAIN: ${BW_DOMAIN}
+    ports:
+      - "8080:80"
+
+  bitwarden-api:
+    image: bitwarden/api:latest
+    restart: unless-stopped
+    environment:
+      globalSettings__baseServiceUri__vault: "https://${BW_DOMAIN}"
+      globalSettings__sqlServer__connectionString: "Server=${BW_DB_SERVER},${BW_DB_PORT};Database=${BW_DB_NAME};User Id=${BW_DB_USER};Password=${BW_DB_PASSWORD};TrustServerCertificate=true"
+      globalSettings__installation__id: "${BW_INSTALLATION_ID}"
+      globalSettings__installation__key: "${BW_INSTALLATION_KEY}"
+
+  bitwarden-identity:
+    image: bitwarden/identity:latest
+    restart: unless-stopped
+    environment:
+      globalSettings__baseServiceUri__vault: "https://${BW_DOMAIN}"
+      globalSettings__sqlServer__connectionString: "Server=${BW_DB_SERVER},${BW_DB_PORT};Database=${BW_DB_NAME};User Id=${BW_DB_USER};Password=${BW_DB_PASSWORD};TrustServerCertificate=true"
+
+  bitwarden-events:
+    image: bitwarden/events:latest
+    restart: unless-stopped
+
+  bitwarden-notifications:
+    image: bitwarden/notifications:latest
+    restart: unless-stopped
+
+  bitwarden-icons:
+    image: bitwarden/icons:latest
+    restart: unless-stopped
+
+  bitwarden-attachments:
+    image: bitwarden/attachments:latest
+    restart: unless-stopped
+    volumes:
+      - /bwdata/core/attachments:/etc/bitwarden/core/attachments
+
+networks:
+  default:
+    name: bitwarden-relay-net
