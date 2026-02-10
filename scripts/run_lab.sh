@@ -21,10 +21,6 @@ Commands:
   terraform  Exécute terraform init/plan/apply (dans Docker)
   ansible    Exécute les playbooks Ansible (dans Docker)
   all        validate + terraform + ansible (défaut, saute les étapes si prérequis/fichiers absents)
-  terraform  Exécute terraform init/plan/apply
-  ansible    Exécute les playbooks Ansible dans l'ordre
-  all        validate + terraform + ansible (défaut, saute les étapes si prérequis/fichiers absents)
-  all        validate + terraform + ansible (défaut)
 
 Variables attendues (env):
   BW_DB_USER
@@ -69,8 +65,6 @@ validate_inventory_groups() {
   inventory_dir="$(dirname "$inventory_file")"
   inventory_base="$(basename "$inventory_file")"
   inventory_in_container="/workspace/${inventory_base}"
-  local inventory_in_container="$1"
-  local inventory_dir="$2"
 
   local inventory_json
   if ! inventory_json="$({
@@ -83,14 +77,20 @@ validate_inventory_groups() {
     exit 1
   fi
 
-  python3 - <<'PY' <<<"$inventory_json"
+  INVENTORY_JSON="$inventory_json" python3 - <<'PY'
 import json
+import os
 import sys
 
 required_groups = ["bitwarden_nodes", "mssql_nodes", "mssql_primary", "reverse_proxy"]
+raw = os.environ.get("INVENTORY_JSON", "")
+json_start = raw.find("{")
+if json_start == -1:
+    print("[ERREUR] Sortie ansible-inventory invalide: JSON introuvable.", file=sys.stderr)
+    sys.exit(1)
 
 try:
-    data = json.load(sys.stdin)
+    data = json.loads(raw[json_start:])
 except Exception as exc:
     print(f"[ERREUR] Sortie ansible-inventory invalide (JSON): {exc}", file=sys.stderr)
     sys.exit(1)
@@ -104,40 +104,6 @@ for group in required_groups:
 if missing:
     print(
         "[ERREUR] Inventory Ansible invalide pour ansible-playbook: groupes manquants ou vides "
-  local inventory_path="$1"
-
-  python3 - "$inventory_path" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-required_groups = ["bitwarden_nodes", "mssql_nodes", "mssql_primary", "reverse_proxy"]
-group_hosts = {g: 0 for g in required_groups}
-
-inventory = Path(sys.argv[1])
-if not inventory.exists():
-    print(f"[ERREUR] Inventory Ansible introuvable: {inventory}", file=sys.stderr)
-    sys.exit(1)
-
-current_group = None
-for raw_line in inventory.read_text(encoding="utf-8").splitlines():
-    line = raw_line.strip()
-    if not line or line.startswith("#"):
-        continue
-
-    section = re.match(r"^\[(.+)\]$", line)
-    if section:
-        name = section.group(1)
-        current_group = name if name in group_hosts else None
-        continue
-
-    if current_group:
-        group_hosts[current_group] += 1
-
-missing = [g for g, count in group_hosts.items() if count == 0]
-if missing:
-    print(
-        "[ERREUR] Inventory Ansible invalide: groupes manquants ou vides "
         + ", ".join(missing)
         + ".",
         file=sys.stderr,
@@ -149,7 +115,6 @@ if missing:
     sys.exit(1)
 
 print("[OK] Inventory Ansible valide (ansible-inventory).")
-print("[OK] Inventory Ansible valide.")
 PY
 }
 
@@ -283,9 +248,6 @@ run_ansible() {
   inventory_dir="$(dirname "$INVENTORY_FILE")"
   inventory_base="$(basename "$INVENTORY_FILE")"
   inventory_in_container="/workspace/${inventory_base}"
-
-  validate_inventory_groups "$INVENTORY_FILE"
-  validate_inventory_groups "$inventory_in_container" "$inventory_dir"
 
   echo "[INFO] Ansible via Docker image: ${ANSIBLE_IMAGE}"
 
