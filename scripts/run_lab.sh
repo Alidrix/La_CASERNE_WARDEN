@@ -21,10 +21,6 @@ Commands:
   terraform  Exécute terraform init/plan/apply (dans Docker)
   ansible    Exécute les playbooks Ansible (dans Docker)
   all        validate + terraform + ansible (défaut, saute les étapes si prérequis/fichiers absents)
-  terraform  Exécute terraform init/plan/apply
-  ansible    Exécute les playbooks Ansible dans l'ordre
-  all        validate + terraform + ansible (défaut, saute les étapes si prérequis/fichiers absents)
-  all        validate + terraform + ansible (défaut)
 
 Variables attendues (env):
   BW_DB_USER
@@ -69,8 +65,6 @@ validate_inventory_groups() {
   inventory_dir="$(dirname "$inventory_file")"
   inventory_base="$(basename "$inventory_file")"
   inventory_in_container="/workspace/${inventory_base}"
-  local inventory_in_container="$1"
-  local inventory_dir="$2"
 
   local inventory_json
   if ! inventory_json="$({
@@ -83,14 +77,20 @@ validate_inventory_groups() {
     exit 1
   fi
 
-  python3 - <<'PY' <<<"$inventory_json"
+  INVENTORY_JSON="$inventory_json" python3 - <<'PY'
 import json
+import os
 import sys
 
 required_groups = ["bitwarden_nodes", "mssql_nodes", "mssql_primary", "reverse_proxy"]
+raw = os.environ.get("INVENTORY_JSON", "")
+json_start = raw.find("{")
+if json_start == -1:
+    print("[ERREUR] Sortie ansible-inventory invalide: JSON introuvable.", file=sys.stderr)
+    sys.exit(1)
 
 try:
-    data = json.load(sys.stdin)
+    data = json.loads(raw[json_start:])
 except Exception as exc:
     print(f"[ERREUR] Sortie ansible-inventory invalide (JSON): {exc}", file=sys.stderr)
     sys.exit(1)
@@ -104,40 +104,6 @@ for group in required_groups:
 if missing:
     print(
         "[ERREUR] Inventory Ansible invalide pour ansible-playbook: groupes manquants ou vides "
-  local inventory_path="$1"
-
-  python3 - "$inventory_path" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-required_groups = ["bitwarden_nodes", "mssql_nodes", "mssql_primary", "reverse_proxy"]
-group_hosts = {g: 0 for g in required_groups}
-
-inventory = Path(sys.argv[1])
-if not inventory.exists():
-    print(f"[ERREUR] Inventory Ansible introuvable: {inventory}", file=sys.stderr)
-    sys.exit(1)
-
-current_group = None
-for raw_line in inventory.read_text(encoding="utf-8").splitlines():
-    line = raw_line.strip()
-    if not line or line.startswith("#"):
-        continue
-
-    section = re.match(r"^\[(.+)\]$", line)
-    if section:
-        name = section.group(1)
-        current_group = name if name in group_hosts else None
-        continue
-
-    if current_group:
-        group_hosts[current_group] += 1
-
-missing = [g for g, count in group_hosts.items() if count == 0]
-if missing:
-    print(
-        "[ERREUR] Inventory Ansible invalide: groupes manquants ou vides "
         + ", ".join(missing)
         + ".",
         file=sys.stderr,
@@ -149,7 +115,6 @@ if missing:
     sys.exit(1)
 
 print("[OK] Inventory Ansible valide (ansible-inventory).")
-print("[OK] Inventory Ansible valide.")
 PY
 }
 
@@ -159,6 +124,28 @@ require_libvirt_socket() {
     echo "         Démarrez libvirtd/virtqemud ou définissez LIBVIRT_SOCK vers un socket valide." >&2
     exit 1
   }
+}
+
+require_terraform_runtime_prereqs() {
+  local precheck_failed=0
+
+  if ! docker run --rm "$TERRAFORM_IMAGE" sh -lc 'command -v mkisofs >/dev/null 2>&1 || command -v genisoimage >/dev/null 2>&1 || command -v xorrisofs >/dev/null 2>&1'; then
+    echo "[ERREUR] Outil ISO manquant dans l'image Terraform (${TERRAFORM_IMAGE})." >&2
+    echo "         Installez mkisofs/genisoimage (ou utilisez une image Terraform qui l'inclut), puis relancez." >&2
+    precheck_failed=1
+  fi
+
+  if has_cmd virsh; then
+    if ! virsh -c qemu:///system pool-info default >/dev/null 2>&1; then
+      echo "[ERREUR] Pool libvirt 'default' introuvable (virsh pool-info default)." >&2
+      echo "         Créez/démarrez le pool 'default' avant d'exécuter Terraform." >&2
+      precheck_failed=1
+    fi
+  else
+    echo "[WARN] virsh absent: vérification du pool libvirt 'default' ignorée." >&2
+  fi
+
+  return "$precheck_failed"
 }
 
 check_password_complexity() {
@@ -178,19 +165,30 @@ check_password_complexity() {
 }
 
 validate_db_credentials_policy() {
-  : "${BW_DB_USER:?BW_DB_USER doit être défini}"
-  : "${BW_DB_PASSWORD:?BW_DB_PASSWORD doit être défini}"
+  local db_user="${BW_DB_USER:-}"
+  local db_password="${BW_DB_PASSWORD:-}"
+
+  if [[ -z "$db_user" && -z "$db_password" ]]; then
+    echo "[WARN] BW_DB_USER/BW_DB_PASSWORD non définis: validation politique identifiants BDD ignorée."
+    echo "       Exportez ces variables pour activer le contrôle de robustesse des identifiants."
+    return 0
+  fi
+
+  if [[ -z "$db_user" || -z "$db_password" ]]; then
+    echo "[ERREUR] BW_DB_USER et BW_DB_PASSWORD doivent être définis ensemble." >&2
+    return 1
+  fi
 
   local low_user low_pwd
-  low_user="$(echo "$BW_DB_USER" | tr '[:upper:]' '[:lower:]')"
-  low_pwd="$(echo "$BW_DB_PASSWORD" | tr '[:upper:]' '[:lower:]')"
+  low_user="$(echo "$db_user" | tr '[:upper:]' '[:lower:]')"
+  low_pwd="$(echo "$db_password" | tr '[:upper:]' '[:lower:]')"
 
   local -a forbidden_users=("sa" "admin" "bitwarden" "vault")
   local -a forbidden_passwords=("password" "password123" "changeme" "admin" "bitwarden" "vault" "sa")
 
   for u in "${forbidden_users[@]}"; do
     if [[ "$low_user" == "$u" ]]; then
-      echo "[ERREUR] BW_DB_USER utilise une valeur par défaut/interdite: ${BW_DB_USER}" >&2
+      echo "[ERREUR] BW_DB_USER utilise une valeur par défaut/interdite: ${db_user}" >&2
       return 1
     fi
   done
@@ -202,7 +200,7 @@ validate_db_credentials_policy() {
     fi
   done
 
-  check_password_complexity "$BW_DB_PASSWORD"
+  check_password_complexity "$db_password"
   echo "[OK] Politique identifiants BDD validée."
 }
 
@@ -241,6 +239,7 @@ PY
 run_terraform() {
   require_cmd docker
   require_libvirt_socket
+  require_terraform_runtime_prereqs
   [[ -f "$TFVARS_FILE" ]] || {
     echo "[ERREUR] terraform.tfvars introuvable: $TFVARS_FILE" >&2
     exit 1
@@ -284,9 +283,6 @@ run_ansible() {
   inventory_base="$(basename "$INVENTORY_FILE")"
   inventory_in_container="/workspace/${inventory_base}"
 
-  validate_inventory_groups "$INVENTORY_FILE"
-  validate_inventory_groups "$inventory_in_container" "$inventory_dir"
-
   echo "[INFO] Ansible via Docker image: ${ANSIBLE_IMAGE}"
 
   docker run --rm -it \
@@ -324,6 +320,8 @@ run_all() {
   elif ! has_libvirt_socket; then
     echo "[WARN] Socket libvirt introuvable (${LIBVIRT_SOCK}): étape terraform ignorée."
     echo "       Démarrez libvirtd/virtqemud ou définissez LIBVIRT_SOCK vers un socket valide."
+  elif ! require_terraform_runtime_prereqs; then
+    echo "[WARN] Prérequis Terraform/libvirt non satisfaits: étape terraform ignorée."
   else
     run_terraform
   fi
