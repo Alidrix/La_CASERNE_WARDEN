@@ -59,6 +59,41 @@ has_libvirt_socket() {
 }
 
 validate_inventory_groups() {
+  local inventory_in_container="$1"
+  local inventory_dir="$2"
+
+  local inventory_json
+  if ! inventory_json="$({
+    docker run --rm \
+      -v "${inventory_dir}:/workspace:ro" \
+      "$ANSIBLE_IMAGE" ansible-inventory -i "$inventory_in_container" --list
+  })"; then
+    echo "[ERREUR] Impossible de parser l'inventory via ansible-inventory dans le conteneur ${ANSIBLE_IMAGE}." >&2
+    echo "         Vérifiez le format INI, les permissions du fichier et l'image Ansible." >&2
+    exit 1
+  fi
+
+  python3 - <<'PY' <<<"$inventory_json"
+import json
+import sys
+
+required_groups = ["bitwarden_nodes", "mssql_nodes", "mssql_primary", "reverse_proxy"]
+
+try:
+    data = json.load(sys.stdin)
+except Exception as exc:
+    print(f"[ERREUR] Sortie ansible-inventory invalide (JSON): {exc}", file=sys.stderr)
+    sys.exit(1)
+
+missing = []
+for group in required_groups:
+    hosts = data.get(group, {}).get("hosts", [])
+    if not hosts:
+        missing.append(group)
+
+if missing:
+    print(
+        "[ERREUR] Inventory Ansible invalide pour ansible-playbook: groupes manquants ou vides "
   local inventory_path="$1"
 
   python3 - "$inventory_path" <<'PY'
@@ -103,6 +138,7 @@ if missing:
     )
     sys.exit(1)
 
+print("[OK] Inventory Ansible valide (ansible-inventory).")
 print("[OK] Inventory Ansible valide.")
 PY
 }
@@ -237,6 +273,8 @@ run_ansible() {
   inventory_dir="$(dirname "$INVENTORY_FILE")"
   inventory_base="$(basename "$INVENTORY_FILE")"
   inventory_in_container="/workspace/${inventory_base}"
+
+  validate_inventory_groups "$inventory_in_container" "$inventory_dir"
 
   echo "[INFO] Ansible via Docker image: ${ANSIBLE_IMAGE}"
 

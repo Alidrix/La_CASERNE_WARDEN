@@ -76,6 +76,7 @@ cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 cp inventory.ini.example inventory.ini
 ```
 (ou définir `INVENTORY_FILE=/chemin/inventory.ini`).
+> Le script valide désormais l'inventaire avec `ansible-inventory` (dans le conteneur Ansible) avant les playbooks.
 3. Lancer le flux complet:
 ```bash
 ./scripts/run_lab.sh all
