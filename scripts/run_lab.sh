@@ -7,11 +7,18 @@ ANSIBLE_DIR="${ROOT_DIR}/ansible"
 INVENTORY_FILE="${INVENTORY_FILE:-${ROOT_DIR}/inventory.ini}"
 TFVARS_FILE="${TFVARS_FILE:-${TF_DIR}/terraform.tfvars}"
 
+# Exécution obligatoire via conteneurs
+TERRAFORM_IMAGE="${TERRAFORM_IMAGE:-hashicorp/terraform:1.9.8}"
+ANSIBLE_IMAGE="${ANSIBLE_IMAGE:-cytopia/ansible:latest-tools}"
+
 usage() {
   cat <<USAGE
 Usage: $0 [all|terraform|ansible|validate]
 
 Commands:
+  validate   Vérifie les prérequis + politique identifiants BDD
+  terraform  Exécute Terraform dans un conteneur Docker
+  ansible    Exécute Ansible dans un conteneur Docker
   validate   Vérifie les prérequis et la politique des identifiants BDD
   terraform  Exécute terraform init/plan/apply
   ansible    Exécute les playbooks Ansible dans l'ordre
@@ -22,6 +29,11 @@ Variables attendues (env):
   BW_DB_USER
   BW_DB_PASSWORD
 
+Variables optionnelles:
+  INVENTORY_FILE=/chemin/inventory.ini
+  TFVARS_FILE=/chemin/terraform.tfvars
+  TERRAFORM_IMAGE=hashicorp/terraform:1.9.8
+  ANSIBLE_IMAGE=cytopia/ansible:latest-tools
 Optionnel:
   INVENTORY_FILE=/chemin/inventory.ini
   TFVARS_FILE=/chemin/terraform.tfvars
@@ -85,6 +97,9 @@ validate_db_credentials_policy() {
 run_validate() {
   require_cmd bash
   require_cmd python3
+  require_cmd docker
+  validate_db_credentials_policy
+
   validate_db_credentials_policy
 
   if command -v terraform >/dev/null 2>&1; then
@@ -107,6 +122,16 @@ for p in glob.glob('ansible/*.yml') + glob.glob('compose/*.yml'):
         yaml.safe_load(f)
 print('[OK] YAML valide (ansible + compose)')
 PY
+
+  if docker run --rm -v "${TF_DIR}:/workspace" -w /workspace "$TERRAFORM_IMAGE" fmt -check -recursive >/dev/null 2>&1; then
+    echo "[OK] Terraform fmt valide via conteneur ${TERRAFORM_IMAGE}."
+  else
+    echo "[WARN] Terraform fmt non validé (image absente, réseau indisponible ou format à corriger)."
+  fi
+}
+
+run_terraform() {
+
 }
 
 run_terraform() {
@@ -116,6 +141,24 @@ run_terraform() {
     exit 1
   }
 
+  echo "[INFO] Terraform via Docker image: ${TERRAFORM_IMAGE}"
+  docker run --rm -it \
+    -v "${TF_DIR}:/workspace" \
+    -w /workspace \
+    "$TERRAFORM_IMAGE" init
+
+  docker run --rm -it \
+    -v "${TF_DIR}:/workspace" \
+    -w /workspace \
+    "$TERRAFORM_IMAGE" plan -var-file="$(basename "$TFVARS_FILE")"
+
+  docker run --rm -it \
+    -v "${TF_DIR}:/workspace" \
+    -w /workspace \
+    "$TERRAFORM_IMAGE" apply -auto-approve -var-file="$(basename "$TFVARS_FILE")"
+}
+
+run_ansible() {
   terraform -chdir="$TF_DIR" init
   terraform -chdir="$TF_DIR" plan -var-file="$TFVARS_FILE"
   terraform -chdir="$TF_DIR" apply -auto-approve -var-file="$TFVARS_FILE"
@@ -128,6 +171,27 @@ run_ansible() {
     exit 1
   }
 
+  echo "[INFO] Ansible via Docker image: ${ANSIBLE_IMAGE}"
+
+  docker run --rm -it \
+    -v "${ROOT_DIR}:/workspace" \
+    -w /workspace \
+    "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/setup_docker.yml"
+
+  docker run --rm -it \
+    -v "${ROOT_DIR}:/workspace" \
+    -w /workspace \
+    "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/config_db_replication.yml"
+
+  docker run --rm -it \
+    -v "${ROOT_DIR}:/workspace" \
+    -w /workspace \
+    "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/deploy_bitwarden.yml"
+
+  docker run --rm -it \
+    -v "${ROOT_DIR}:/workspace" \
+    -w /workspace \
+    "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/configure_proxy.yml"
   ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/setup_docker.yml"
   ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/config_db_replication.yml"
   ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/deploy_bitwarden.yml"
