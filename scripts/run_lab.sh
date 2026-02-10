@@ -58,6 +58,64 @@ has_libvirt_socket() {
   [[ -S "$LIBVIRT_SOCK" ]]
 }
 
+validate_inventory_groups() {
+  local inventory_file="${1:-}"
+  [[ -n "$inventory_file" ]] || {
+    echo "[ERREUR] validate_inventory_groups: chemin inventory manquant." >&2
+    exit 1
+  }
+
+  local inventory_dir inventory_base inventory_in_container
+  inventory_dir="$(dirname "$inventory_file")"
+  inventory_base="$(basename "$inventory_file")"
+  inventory_in_container="/workspace/${inventory_base}"
+
+  local inventory_json
+  if ! inventory_json="$({
+    docker run --rm \
+      -v "${inventory_dir}:/workspace:ro" \
+      "$ANSIBLE_IMAGE" ansible-inventory -i "$inventory_in_container" --list
+  })"; then
+    echo "[ERREUR] Impossible de parser l'inventory via ansible-inventory dans le conteneur ${ANSIBLE_IMAGE}." >&2
+    echo "         Vérifiez le format INI, les permissions du fichier et l'image Ansible." >&2
+    exit 1
+  fi
+
+  python3 - <<'PY' <<<"$inventory_json"
+import json
+import sys
+
+required_groups = ["bitwarden_nodes", "mssql_nodes", "mssql_primary", "reverse_proxy"]
+
+try:
+    data = json.load(sys.stdin)
+except Exception as exc:
+    print(f"[ERREUR] Sortie ansible-inventory invalide (JSON): {exc}", file=sys.stderr)
+    sys.exit(1)
+
+missing = []
+for group in required_groups:
+    hosts = data.get(group, {}).get("hosts", [])
+    if not hosts:
+        missing.append(group)
+
+if missing:
+    print(
+        "[ERREUR] Inventory Ansible invalide pour ansible-playbook: groupes manquants ou vides "
+        + ", ".join(missing)
+        + ".",
+        file=sys.stderr,
+    )
+    print(
+        "         Copiez inventory.ini.example vers inventory.ini puis adaptez les IP/variables.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+print("[OK] Inventory Ansible valide (ansible-inventory).")
+PY
+}
+
 require_libvirt_socket() {
   has_libvirt_socket || {
     echo "[ERREUR] Socket libvirt introuvable: ${LIBVIRT_SOCK}." >&2
@@ -176,6 +234,7 @@ run_terraform() {
 
 run_ansible() {
   require_cmd docker
+  require_cmd python3
   [[ -f "$INVENTORY_FILE" ]] || {
     echo "[ERREUR] Inventory Ansible introuvable: $INVENTORY_FILE" >&2
     exit 1
@@ -185,6 +244,8 @@ run_ansible() {
   inventory_dir="$(dirname "$INVENTORY_FILE")"
   inventory_base="$(basename "$INVENTORY_FILE")"
   inventory_in_container="/workspace/${inventory_base}"
+
+  validate_inventory_groups "$INVENTORY_FILE"
 
   echo "[INFO] Ansible via Docker image: ${ANSIBLE_IMAGE}"
 
