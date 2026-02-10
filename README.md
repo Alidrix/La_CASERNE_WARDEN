@@ -66,34 +66,18 @@ Images Docker utilisées par défaut:
 - Terraform: `hashicorp/terraform:1.14.4`
 - Ansible: `cytopia/ansible:latest-tools`
 
-Vérifier la version effective du script:
+Préparer les fichiers d'entrée avant `all`:
+1. Copier le template Terraform puis adapter les valeurs requises:
 ```bash
-grep -n "TERRAFORM_IMAGE" scripts/run_lab.sh
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 ```
-- Terraform: `hashicorp/terraform:1.9.8`
-- Ansible: `cytopia/ansible:latest-tools`
-Si Terraform n'est pas encore installé:
-- lance d'abord `./scripts/run_lab.sh validate`
-- ou `./scripts/run_lab.sh ansible` si l'inventaire est prêt
-- la commande `./scripts/run_lab.sh all` saute maintenant automatiquement les étapes dont le binaire est absent.
+2. Créer/renseigner `inventory.ini` à la racine (ou définir `INVENTORY_FILE=/chemin/inventory.ini`).
+3. Lancer le flux complet:
+```bash
+./scripts/run_lab.sh all
+```
 
-
-1. Préparer une image cloud Ubuntu 22.04 (ou Debian 12) et la variable `base_image_path`.
-2. Créer un `terraform.tfvars` (clé SSH, CIDR, FQDN).
-3. Provisionner les VMs:
-   - `cd terraform`
-   - `terraform init`
-   - `terraform plan`
-   - `terraform apply`
-4. Définir un inventaire Ansible avec groupes:
-   - `bitwarden_nodes` (3 nœuds)
-   - `reverse_proxy` (LB frontal)
-   - `mssql_nodes` + `mssql_primary`
-5. Exécuter les playbooks:
-   - `ansible-playbook -i inventory.ini ansible/setup_docker.yml`
-   - `ansible-playbook -i inventory.ini ansible/config_db_replication.yml`
-   - `ansible-playbook -i inventory.ini ansible/deploy_bitwarden.yml`
-   - `ansible-playbook -i inventory.ini ansible/configure_proxy.yml`
+> Le script exécute Terraform et Ansible dans des conteneurs Docker. Aucune installation locale de `terraform` ou `ansible-playbook` n'est nécessaire.
 
 > Note: Les commandes Terraform/Ansible du script sont exécutées dans Docker (images configurables via `TERRAFORM_IMAGE` et `ANSIBLE_IMAGE`).
 

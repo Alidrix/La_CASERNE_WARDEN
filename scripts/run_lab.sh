@@ -16,14 +16,10 @@ usage() {
 Usage: $0 [all|terraform|ansible|validate]
 
 Commands:
-  validate   Vérifie les prérequis + politique identifiants BDD
-  terraform  Exécute Terraform dans un conteneur Docker
-  ansible    Exécute Ansible dans un conteneur Docker
   validate   Vérifie les prérequis et la politique des identifiants BDD
   terraform  Exécute terraform init/plan/apply
   ansible    Exécute les playbooks Ansible dans l'ordre
-  all        validate + terraform + ansible (défaut, saute les étapes si binaire absent)
-  all        validate + terraform + ansible (défaut)
+  all        validate + terraform + ansible (défaut, saute les étapes si prérequis/fichiers absents)
 
 Variables attendues (env):
   BW_DB_USER
@@ -34,9 +30,10 @@ Variables optionnelles:
   TFVARS_FILE=/chemin/terraform.tfvars
   TERRAFORM_IMAGE=hashicorp/terraform:1.14.4
   ANSIBLE_IMAGE=cytopia/ansible:latest-tools
-Optionnel:
-  INVENTORY_FILE=/chemin/inventory.ini
-  TFVARS_FILE=/chemin/terraform.tfvars
+
+Fichiers attendus:
+  ${ROOT_DIR}/terraform/terraform.tfvars (ou TFVARS_FILE=/chemin/fichier)
+  ${ROOT_DIR}/inventory.ini (ou INVENTORY_FILE=/chemin/fichier)
 USAGE
 }
 
@@ -98,15 +95,8 @@ run_validate() {
   require_cmd bash
   require_cmd python3
   require_cmd docker
-  validate_db_credentials_policy
 
   validate_db_credentials_policy
-
-  if command -v terraform >/dev/null 2>&1; then
-    terraform -chdir="$TF_DIR" fmt -check -recursive
-  else
-    echo "[WARN] terraform non installé: fmt ignoré."
-  fi
 
   python3 - <<'PY'
 import glob
@@ -126,12 +116,12 @@ PY
   if docker run --rm -v "${TF_DIR}:/workspace" -w /workspace "$TERRAFORM_IMAGE" fmt -check -recursive >/dev/null 2>&1; then
     echo "[OK] Terraform fmt valide via conteneur ${TERRAFORM_IMAGE}."
   else
-    echo "[WARN] Terraform fmt non validé (image absente, réseau indisponible ou format à corriger)."
+    echo "[WARN] Terraform fmt non validé via conteneur (image absente, réseau indisponible, démon Docker indisponible ou format à corriger)."
   fi
 }
 
 run_terraform() {
-  require_cmd terraform
+  require_cmd docker
   [[ -f "$TFVARS_FILE" ]] || {
     echo "[ERREUR] terraform.tfvars introuvable: $TFVARS_FILE" >&2
     exit 1
@@ -155,13 +145,7 @@ run_terraform() {
 }
 
 run_ansible() {
-  terraform -chdir="$TF_DIR" init
-  terraform -chdir="$TF_DIR" plan -var-file="$TFVARS_FILE"
-  terraform -chdir="$TF_DIR" apply -auto-approve -var-file="$TFVARS_FILE"
-}
-
-run_ansible() {
-  require_cmd ansible-playbook
+  require_cmd docker
   [[ -f "$INVENTORY_FILE" ]] || {
     echo "[ERREUR] Inventory Ansible introuvable: $INVENTORY_FILE" >&2
     exit 1
@@ -188,10 +172,6 @@ run_ansible() {
     -v "${ROOT_DIR}:/workspace" \
     -w /workspace \
     "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/configure_proxy.yml"
-  ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/setup_docker.yml"
-  ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/config_db_replication.yml"
-  ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/deploy_bitwarden.yml"
-  ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/configure_proxy.yml"
 }
 
 has_cmd() {
@@ -215,19 +195,22 @@ main() {
       ;;
     all)
       run_validate
-      if has_cmd terraform; then
-        run_terraform
+
+      if ! has_cmd docker; then
+        echo "[WARN] docker absent: étape terraform ignorée. Utilisez ./scripts/run_lab.sh terraform après installation de Docker."
+      elif [[ ! -f "$TFVARS_FILE" ]]; then
+        echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (copiez terraform/terraform.tfvars.example vers terraform/terraform.tfvars, puis adaptez les valeurs)."
       else
-        echo "[WARN] terraform absent: étape terraform ignorée. Utilisez ./scripts/run_lab.sh terraform après installation."
+        run_terraform
       fi
 
-      if has_cmd ansible-playbook; then
-        run_ansible
+      if ! has_cmd docker; then
+        echo "[WARN] docker absent: étape ansible ignorée. Utilisez ./scripts/run_lab.sh ansible après installation de Docker."
+      elif [[ ! -f "$INVENTORY_FILE" ]]; then
+        echo "[WARN] inventory Ansible introuvable: ${INVENTORY_FILE}. Étape ansible ignorée (utilisez INVENTORY_FILE=/chemin/fichier ou créez le fichier)."
       else
-        echo "[WARN] ansible-playbook absent: étape ansible ignorée. Utilisez ./scripts/run_lab.sh ansible après installation."
+        run_ansible
       fi
-      run_terraform
-      run_ansible
       ;;
     -h|--help|help)
       usage
