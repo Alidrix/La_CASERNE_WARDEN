@@ -31,6 +31,10 @@ Variables optionnelles:
   TFVARS_FILE=/chemin/terraform.tfvars
   TERRAFORM_IMAGE=hashicorp/terraform:1.14.4
   ANSIBLE_IMAGE=cytopia/ansible:latest-tools
+
+Fichiers attendus:
+  ${ROOT_DIR}/terraform/terraform.tfvars (ou TFVARS_FILE=/chemin/fichier)
+  ${ROOT_DIR}/inventory.ini (ou INVENTORY_FILE=/chemin/fichier)
 USAGE
 }
 
@@ -95,12 +99,6 @@ run_validate() {
 
   validate_db_credentials_policy
 
-  if command -v terraform >/dev/null 2>&1; then
-    terraform -chdir="$TF_DIR" fmt -check -recursive
-  else
-    echo "[WARN] terraform non installé: fmt ignoré."
-  fi
-
   python3 - <<'PY'
 import glob
 import sys
@@ -119,7 +117,7 @@ PY
   if docker run --rm -v "${TF_DIR}:/workspace" -w /workspace "$TERRAFORM_IMAGE" fmt -check -recursive >/dev/null 2>&1; then
     echo "[OK] Terraform fmt valide via conteneur ${TERRAFORM_IMAGE}."
   else
-    echo "[WARN] Terraform fmt non validé (image absente, réseau indisponible ou format à corriger)."
+    echo "[WARN] Terraform fmt non validé via conteneur (image absente, réseau indisponible, démon Docker indisponible ou format à corriger)."
   fi
 }
 
@@ -202,6 +200,8 @@ main() {
         if [[ -f "$TFVARS_FILE" ]]; then
           run_terraform
         else
+          echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (copiez terraform/terraform.tfvars.example vers terraform/terraform.tfvars, puis adaptez les valeurs)."
+        fi
           echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (utilisez TFVARS_FILE=/chemin/fichier ou créez le fichier)."
         fi
         run_terraform

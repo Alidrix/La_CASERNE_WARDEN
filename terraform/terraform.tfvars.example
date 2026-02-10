@@ -1,0 +1,17 @@
+# Exemple pour un lab local.
+# Copiez ce fichier vers terraform/terraform.tfvars puis adaptez.
+# cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+
+# Requis (pas de valeur par défaut dans variables.tf)
+base_image_path = "/var/lib/libvirt/images/ubuntu-22.04-server-cloudimg-amd64.img"
+ssh_public_key  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@host"
+
+# Optionnel (surcharges de defaults utiles en lab)
+# libvirt_uri   = "qemu:///system"
+# storage_pool  = "default"
+# network_name  = "bw-lab-net"
+# network_cidr  = "10.30.0.0/24"
+# gateway_ip    = "10.30.0.1"
+# dns_server_ip = "10.30.0.53"
+# domain_suffix = "lab.local"
+# admin_user    = "ops"
