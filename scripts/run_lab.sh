@@ -10,6 +10,7 @@ TFVARS_FILE="${TFVARS_FILE:-${TF_DIR}/terraform.tfvars}"
 # Exécution via conteneurs
 TERRAFORM_IMAGE="${TERRAFORM_IMAGE:-hashicorp/terraform:1.14.4}"
 ANSIBLE_IMAGE="${ANSIBLE_IMAGE:-cytopia/ansible:latest-tools}"
+LIBVIRT_SOCK="${LIBVIRT_SOCK:-/var/run/libvirt/libvirt-sock}"
 
 usage() {
   cat <<USAGE
@@ -34,6 +35,7 @@ Variables optionnelles:
   TFVARS_FILE=/chemin/terraform.tfvars
   TERRAFORM_IMAGE=hashicorp/terraform:1.14.4
   ANSIBLE_IMAGE=cytopia/ansible:latest-tools
+  LIBVIRT_SOCK=/var/run/libvirt/libvirt-sock
 
 Fichiers attendus:
   ${ROOT_DIR}/terraform/terraform.tfvars (ou TFVARS_FILE=/chemin/fichier)
@@ -50,6 +52,18 @@ require_cmd() {
 
 has_cmd() {
   command -v "$1" >/dev/null 2>&1
+}
+
+has_libvirt_socket() {
+  [[ -S "$LIBVIRT_SOCK" ]]
+}
+
+require_libvirt_socket() {
+  has_libvirt_socket || {
+    echo "[ERREUR] Socket libvirt introuvable: ${LIBVIRT_SOCK}." >&2
+    echo "         Démarrez libvirtd/virtqemud ou définissez LIBVIRT_SOCK vers un socket valide." >&2
+    exit 1
+  }
 }
 
 check_password_complexity() {
@@ -125,31 +139,37 @@ PY
     echo "[OK] Terraform fmt valide via conteneur ${TERRAFORM_IMAGE}."
   fi
   if [[ $fmt_status -ne 0 ]]; then
-  else
     echo "[WARN] Terraform fmt non validé via conteneur (image absente, réseau indisponible, démon Docker indisponible ou format à corriger)."
   fi
 }
 
 run_terraform() {
   require_cmd docker
+  require_libvirt_socket
   [[ -f "$TFVARS_FILE" ]] || {
     echo "[ERREUR] terraform.tfvars introuvable: $TFVARS_FILE" >&2
     exit 1
   }
 
+  local libvirt_sock_dir
+  libvirt_sock_dir="$(dirname "$LIBVIRT_SOCK")"
+
   echo "[INFO] Terraform via Docker image: ${TERRAFORM_IMAGE}"
   docker run --rm -it \
     -v "${TF_DIR}:/workspace" \
+    -v "${libvirt_sock_dir}:${libvirt_sock_dir}" \
     -w /workspace \
     "$TERRAFORM_IMAGE" init
 
   docker run --rm -it \
     -v "${TF_DIR}:/workspace" \
+    -v "${libvirt_sock_dir}:${libvirt_sock_dir}" \
     -w /workspace \
     "$TERRAFORM_IMAGE" plan -var-file="$(basename "$TFVARS_FILE")"
 
   docker run --rm -it \
     -v "${TF_DIR}:/workspace" \
+    -v "${libvirt_sock_dir}:${libvirt_sock_dir}" \
     -w /workspace \
     "$TERRAFORM_IMAGE" apply -auto-approve -var-file="$(basename "$TFVARS_FILE")"
 }
@@ -161,27 +181,36 @@ run_ansible() {
     exit 1
   }
 
+  local inventory_in_container inventory_dir inventory_base
+  inventory_dir="$(dirname "$INVENTORY_FILE")"
+  inventory_base="$(basename "$INVENTORY_FILE")"
+  inventory_in_container="/workspace/${inventory_base}"
+
   echo "[INFO] Ansible via Docker image: ${ANSIBLE_IMAGE}"
 
   docker run --rm -it \
-    -v "${ROOT_DIR}:/workspace" \
-    -w /workspace \
-    "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/setup_docker.yml"
+    -v "${inventory_dir}:/workspace:ro" \
+    -v "${ANSIBLE_DIR}:/ansible:ro" \
+    -w /ansible \
+    "$ANSIBLE_IMAGE" ansible-playbook -i "$inventory_in_container" /ansible/setup_docker.yml
 
   docker run --rm -it \
-    -v "${ROOT_DIR}:/workspace" \
-    -w /workspace \
-    "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/config_db_replication.yml"
+    -v "${inventory_dir}:/workspace:ro" \
+    -v "${ANSIBLE_DIR}:/ansible:ro" \
+    -w /ansible \
+    "$ANSIBLE_IMAGE" ansible-playbook -i "$inventory_in_container" /ansible/config_db_replication.yml
 
   docker run --rm -it \
-    -v "${ROOT_DIR}:/workspace" \
-    -w /workspace \
-    "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/deploy_bitwarden.yml"
+    -v "${inventory_dir}:/workspace:ro" \
+    -v "${ANSIBLE_DIR}:/ansible:ro" \
+    -w /ansible \
+    "$ANSIBLE_IMAGE" ansible-playbook -i "$inventory_in_container" /ansible/deploy_bitwarden.yml
 
   docker run --rm -it \
-    -v "${ROOT_DIR}:/workspace" \
-    -w /workspace \
-    "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/configure_proxy.yml"
+    -v "${inventory_dir}:/workspace:ro" \
+    -v "${ANSIBLE_DIR}:/ansible:ro" \
+    -w /ansible \
+    "$ANSIBLE_IMAGE" ansible-playbook -i "$inventory_in_container" /ansible/configure_proxy.yml
 }
 
 run_all() {
@@ -189,15 +218,11 @@ run_all() {
 
   if ! has_cmd docker; then
     echo "[WARN] docker absent: étape terraform ignorée. Utilisez ./scripts/run_lab.sh terraform après installation de Docker."
-  fi
-  if has_cmd docker && [[ ! -f "$TFVARS_FILE" ]]; then
-    echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (copiez terraform/terraform.tfvars.example vers terraform/terraform.tfvars, puis adaptez les valeurs)."
-  fi
-  if has_cmd docker && [[ -f "$TFVARS_FILE" ]]; then
-    run_terraform
-  fi
   elif [[ ! -f "$TFVARS_FILE" ]]; then
     echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (copiez terraform/terraform.tfvars.example vers terraform/terraform.tfvars, puis adaptez les valeurs)."
+  elif ! has_libvirt_socket; then
+    echo "[WARN] Socket libvirt introuvable (${LIBVIRT_SOCK}): étape terraform ignorée."
+    echo "       Démarrez libvirtd/virtqemud ou définissez LIBVIRT_SOCK vers un socket valide."
   else
     run_terraform
   fi
@@ -211,16 +236,6 @@ run_all() {
   fi
 }
 
-  if ! has_cmd docker; then
-    echo "[WARN] docker absent: étape ansible ignorée. Utilisez ./scripts/run_lab.sh ansible après installation de Docker."
-  fi
-  if has_cmd docker && [[ ! -f "$INVENTORY_FILE" ]]; then
-    echo "[WARN] inventory Ansible introuvable: ${INVENTORY_FILE}. Étape ansible ignorée (utilisez INVENTORY_FILE=/chemin/fichier ou créez le fichier)."
-  fi
-  if has_cmd docker && [[ -f "$INVENTORY_FILE" ]]; then
-    run_ansible
-  fi
-}
 main() {
   local command="${1:-all}"
 
@@ -238,45 +253,6 @@ main() {
       ;;
     all)
       run_all
-      run_validate
-
-      if ! has_cmd docker; then
-        echo "[WARN] docker absent: étape terraform ignorée. Utilisez ./scripts/run_lab.sh terraform après installation de Docker."
-      elif [[ ! -f "$TFVARS_FILE" ]]; then
-        echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (copiez terraform/terraform.tfvars.example vers terraform/terraform.tfvars, puis adaptez les valeurs)."
-      else
-        run_terraform
-      fi
-
-      if ! has_cmd docker; then
-        echo "[WARN] docker absent: étape ansible ignorée. Utilisez ./scripts/run_lab.sh ansible après installation de Docker."
-      elif [[ ! -f "$INVENTORY_FILE" ]]; then
-        echo "[WARN] inventory Ansible introuvable: ${INVENTORY_FILE}. Étape ansible ignorée (utilisez INVENTORY_FILE=/chemin/fichier ou créez le fichier)."
-      else
-        run_ansible
-      if has_cmd docker; then
-        if [[ -f "$TFVARS_FILE" ]]; then
-          run_terraform
-        else
-          echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (copiez terraform/terraform.tfvars.example vers terraform/terraform.tfvars, puis adaptez les valeurs)."
-        fi
-          echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (utilisez TFVARS_FILE=/chemin/fichier ou créez le fichier)."
-        fi
-        run_terraform
-      else
-        echo "[WARN] docker absent: étape terraform ignorée. Utilisez ./scripts/run_lab.sh terraform après installation de Docker."
-      fi
-
-      if has_cmd docker; then
-        if [[ -f "$INVENTORY_FILE" ]]; then
-          run_ansible
-        else
-          echo "[WARN] inventory Ansible introuvable: ${INVENTORY_FILE}. Étape ansible ignorée (utilisez INVENTORY_FILE=/chemin/fichier ou créez le fichier)."
-        fi
-        run_ansible
-      else
-        echo "[WARN] docker absent: étape ansible ignorée. Utilisez ./scripts/run_lab.sh ansible après installation de Docker."
-      fi
       ;;
     -h|--help|help)
       usage
