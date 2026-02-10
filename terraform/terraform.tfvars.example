@@ -9,7 +9,7 @@ base_image_path = "/var/lib/libvirt/images/ubuntu-22.04-server-cloudimg-amd64.im
 
 # Clé publique SSH injectée dans les VMs cloud-init.
 # Générer si besoin: ssh-keygen -t ed25519 -C "lab-bitwarden" -f ~/.ssh/id_ed25519
-ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFILL_WITH_YOUR_REAL_PUBLIC_KEY user@pn"
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEwbw7flATYP9whquQzKA9oHA7OerC2fLtJiWMOyFdOh lab-bitwarden"
 
 # --- Paramètres infra (surcharges explicites pour un lab local) ---
 libvirt_uri   = "qemu:///system"
