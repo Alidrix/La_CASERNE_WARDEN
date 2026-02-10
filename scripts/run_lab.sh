@@ -196,6 +196,21 @@ main() {
       ;;
     all)
       run_validate
+
+      if ! has_cmd docker; then
+        echo "[WARN] docker absent: étape terraform ignorée. Utilisez ./scripts/run_lab.sh terraform après installation de Docker."
+      elif [[ ! -f "$TFVARS_FILE" ]]; then
+        echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (copiez terraform/terraform.tfvars.example vers terraform/terraform.tfvars, puis adaptez les valeurs)."
+      else
+        run_terraform
+      fi
+
+      if ! has_cmd docker; then
+        echo "[WARN] docker absent: étape ansible ignorée. Utilisez ./scripts/run_lab.sh ansible après installation de Docker."
+      elif [[ ! -f "$INVENTORY_FILE" ]]; then
+        echo "[WARN] inventory Ansible introuvable: ${INVENTORY_FILE}. Étape ansible ignorée (utilisez INVENTORY_FILE=/chemin/fichier ou créez le fichier)."
+      else
+        run_ansible
       if has_cmd docker; then
         if [[ -f "$TFVARS_FILE" ]]; then
           run_terraform
