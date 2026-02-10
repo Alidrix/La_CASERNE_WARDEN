@@ -126,6 +126,28 @@ require_libvirt_socket() {
   }
 }
 
+require_terraform_runtime_prereqs() {
+  local precheck_failed=0
+
+  if ! docker run --rm "$TERRAFORM_IMAGE" sh -lc 'command -v mkisofs >/dev/null 2>&1 || command -v genisoimage >/dev/null 2>&1 || command -v xorrisofs >/dev/null 2>&1'; then
+    echo "[ERREUR] Outil ISO manquant dans l'image Terraform (${TERRAFORM_IMAGE})." >&2
+    echo "         Installez mkisofs/genisoimage (ou utilisez une image Terraform qui l'inclut), puis relancez." >&2
+    precheck_failed=1
+  fi
+
+  if has_cmd virsh; then
+    if ! virsh -c qemu:///system pool-info default >/dev/null 2>&1; then
+      echo "[ERREUR] Pool libvirt 'default' introuvable (virsh pool-info default)." >&2
+      echo "         Créez/démarrez le pool 'default' avant d'exécuter Terraform." >&2
+      precheck_failed=1
+    fi
+  else
+    echo "[WARN] virsh absent: vérification du pool libvirt 'default' ignorée." >&2
+  fi
+
+  return "$precheck_failed"
+}
+
 check_password_complexity() {
   local pwd="$1"
 
@@ -206,6 +228,7 @@ PY
 run_terraform() {
   require_cmd docker
   require_libvirt_socket
+  require_terraform_runtime_prereqs
   [[ -f "$TFVARS_FILE" ]] || {
     echo "[ERREUR] terraform.tfvars introuvable: $TFVARS_FILE" >&2
     exit 1
@@ -286,6 +309,8 @@ run_all() {
   elif ! has_libvirt_socket; then
     echo "[WARN] Socket libvirt introuvable (${LIBVIRT_SOCK}): étape terraform ignorée."
     echo "       Démarrez libvirtd/virtqemud ou définissez LIBVIRT_SOCK vers un socket valide."
+  elif ! require_terraform_runtime_prereqs; then
+    echo "[WARN] Prérequis Terraform/libvirt non satisfaits: étape terraform ignorée."
   else
     run_terraform
   fi
