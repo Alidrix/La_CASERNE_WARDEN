@@ -40,6 +40,7 @@ Dossier: `compose/`
 - Exemples:
   - `./scripts/run_lab.sh validate`
   - `./scripts/run_lab.sh all`
+  - `TERRAFORM_IMAGE=hashicorp/terraform:1.14.4 ANSIBLE_IMAGE=cytopia/ansible:latest-tools ./scripts/run_lab.sh all`
   - `TERRAFORM_IMAGE=hashicorp/terraform:1.9.8 ANSIBLE_IMAGE=cytopia/ansible:latest-tools ./scripts/run_lab.sh all`
 
 Le script applique une politique obligatoire sur les identifiants BDD:
@@ -62,6 +63,13 @@ Prérequis outillage local:
 - pas besoin d'installer `terraform` ni `ansible-playbook` sur l'hôte.
 
 Images Docker utilisées par défaut:
+- Terraform: `hashicorp/terraform:1.14.4`
+- Ansible: `cytopia/ansible:latest-tools`
+
+Vérifier la version effective du script:
+```bash
+grep -n "TERRAFORM_IMAGE" scripts/run_lab.sh
+```
 - Terraform: `hashicorp/terraform:1.9.8`
 - Ansible: `cytopia/ansible:latest-tools`
 Si Terraform n'est pas encore installé:

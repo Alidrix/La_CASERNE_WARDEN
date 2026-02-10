@@ -8,7 +8,7 @@ INVENTORY_FILE="${INVENTORY_FILE:-${ROOT_DIR}/inventory.ini}"
 TFVARS_FILE="${TFVARS_FILE:-${TF_DIR}/terraform.tfvars}"
 
 # Exécution obligatoire via conteneurs
-TERRAFORM_IMAGE="${TERRAFORM_IMAGE:-hashicorp/terraform:1.9.8}"
+TERRAFORM_IMAGE="${TERRAFORM_IMAGE:-hashicorp/terraform:1.14.4}"
 ANSIBLE_IMAGE="${ANSIBLE_IMAGE:-cytopia/ansible:latest-tools}"
 
 usage() {
@@ -32,7 +32,7 @@ Variables attendues (env):
 Variables optionnelles:
   INVENTORY_FILE=/chemin/inventory.ini
   TFVARS_FILE=/chemin/terraform.tfvars
-  TERRAFORM_IMAGE=hashicorp/terraform:1.9.8
+  TERRAFORM_IMAGE=hashicorp/terraform:1.14.4
   ANSIBLE_IMAGE=cytopia/ansible:latest-tools
 Optionnel:
   INVENTORY_FILE=/chemin/inventory.ini
