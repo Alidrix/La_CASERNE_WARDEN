@@ -15,6 +15,7 @@ Commands:
   validate   Vérifie les prérequis et la politique des identifiants BDD
   terraform  Exécute terraform init/plan/apply
   ansible    Exécute les playbooks Ansible dans l'ordre
+  all        validate + terraform + ansible (défaut, saute les étapes si binaire absent)
   all        validate + terraform + ansible (défaut)
 
 Variables attendues (env):
@@ -133,6 +134,10 @@ run_ansible() {
   ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/configure_proxy.yml"
 }
 
+has_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
 main() {
   local command="${1:-all}"
 
@@ -150,6 +155,17 @@ main() {
       ;;
     all)
       run_validate
+      if has_cmd terraform; then
+        run_terraform
+      else
+        echo "[WARN] terraform absent: étape terraform ignorée. Utilisez ./scripts/run_lab.sh terraform après installation."
+      fi
+
+      if has_cmd ansible-playbook; then
+        run_ansible
+      else
+        echo "[WARN] ansible-playbook absent: étape ansible ignorée. Utilisez ./scripts/run_lab.sh ansible après installation."
+      fi
       run_terraform
       run_ansible
       ;;
