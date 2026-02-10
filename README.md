@@ -64,6 +64,10 @@ Prérequis outillage local:
 Images Docker utilisées par défaut:
 - Terraform: `hashicorp/terraform:1.9.8`
 - Ansible: `cytopia/ansible:latest-tools`
+Si Terraform n'est pas encore installé:
+- lance d'abord `./scripts/run_lab.sh validate`
+- ou `./scripts/run_lab.sh ansible` si l'inventaire est prêt
+- la commande `./scripts/run_lab.sh all` saute maintenant automatiquement les étapes dont le binaire est absent.
 
 
 1. Préparer une image cloud Ubuntu 22.04 (ou Debian 12) et la variable `base_image_path`.

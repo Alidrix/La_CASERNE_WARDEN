@@ -19,6 +19,10 @@ Commands:
   validate   Vérifie les prérequis + politique identifiants BDD
   terraform  Exécute Terraform dans un conteneur Docker
   ansible    Exécute Ansible dans un conteneur Docker
+  validate   Vérifie les prérequis et la politique des identifiants BDD
+  terraform  Exécute terraform init/plan/apply
+  ansible    Exécute les playbooks Ansible dans l'ordre
+  all        validate + terraform + ansible (défaut, saute les étapes si binaire absent)
   all        validate + terraform + ansible (défaut)
 
 Variables attendues (env):
@@ -30,6 +34,9 @@ Variables optionnelles:
   TFVARS_FILE=/chemin/terraform.tfvars
   TERRAFORM_IMAGE=hashicorp/terraform:1.9.8
   ANSIBLE_IMAGE=cytopia/ansible:latest-tools
+Optionnel:
+  INVENTORY_FILE=/chemin/inventory.ini
+  TFVARS_FILE=/chemin/terraform.tfvars
 USAGE
 }
 
@@ -64,6 +71,7 @@ validate_db_credentials_policy() {
   low_user="$(echo "$BW_DB_USER" | tr '[:upper:]' '[:lower:]')"
   low_pwd="$(echo "$BW_DB_PASSWORD" | tr '[:upper:]' '[:lower:]')"
 
+  # Valeurs par défaut/interdites courantes
   local -a forbidden_users=("sa" "admin" "bitwarden" "vault")
   local -a forbidden_passwords=("password" "password123" "changeme" "admin" "bitwarden" "vault" "sa")
 
@@ -92,6 +100,14 @@ run_validate() {
   require_cmd docker
   validate_db_credentials_policy
 
+  validate_db_credentials_policy
+
+  if command -v terraform >/dev/null 2>&1; then
+    terraform -chdir="$TF_DIR" fmt -check -recursive
+  else
+    echo "[WARN] terraform non installé: fmt ignoré."
+  fi
+
   python3 - <<'PY'
 import glob
 import sys
@@ -115,6 +131,11 @@ PY
 }
 
 run_terraform() {
+
+}
+
+run_terraform() {
+  require_cmd terraform
   [[ -f "$TFVARS_FILE" ]] || {
     echo "[ERREUR] terraform.tfvars introuvable: $TFVARS_FILE" >&2
     exit 1
@@ -138,6 +159,13 @@ run_terraform() {
 }
 
 run_ansible() {
+  terraform -chdir="$TF_DIR" init
+  terraform -chdir="$TF_DIR" plan -var-file="$TFVARS_FILE"
+  terraform -chdir="$TF_DIR" apply -auto-approve -var-file="$TFVARS_FILE"
+}
+
+run_ansible() {
+  require_cmd ansible-playbook
   [[ -f "$INVENTORY_FILE" ]] || {
     echo "[ERREUR] Inventory Ansible introuvable: $INVENTORY_FILE" >&2
     exit 1
@@ -164,6 +192,14 @@ run_ansible() {
     -v "${ROOT_DIR}:/workspace" \
     -w /workspace \
     "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/configure_proxy.yml"
+  ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/setup_docker.yml"
+  ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/config_db_replication.yml"
+  ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/deploy_bitwarden.yml"
+  ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/configure_proxy.yml"
+}
+
+has_cmd() {
+  command -v "$1" >/dev/null 2>&1
 }
 
 main() {
@@ -183,6 +219,17 @@ main() {
       ;;
     all)
       run_validate
+      if has_cmd terraform; then
+        run_terraform
+      else
+        echo "[WARN] terraform absent: étape terraform ignorée. Utilisez ./scripts/run_lab.sh terraform après installation."
+      fi
+
+      if has_cmd ansible-playbook; then
+        run_ansible
+      else
+        echo "[WARN] ansible-playbook absent: étape ansible ignorée. Utilisez ./scripts/run_lab.sh ansible après installation."
+      fi
       run_terraform
       run_ansible
       ;;
