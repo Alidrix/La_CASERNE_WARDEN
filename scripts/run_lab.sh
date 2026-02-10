@@ -16,6 +16,7 @@ Commands:
   terraform  Exécute terraform init/plan/apply
   ansible    Exécute les playbooks Ansible dans l'ordre
   all        validate + terraform + ansible (défaut, saute les étapes si binaire absent)
+  all        validate + terraform + ansible (défaut)
 
 Variables attendues (env):
   BW_DB_USER
@@ -165,6 +166,8 @@ main() {
       else
         echo "[WARN] ansible-playbook absent: étape ansible ignorée. Utilisez ./scripts/run_lab.sh ansible après installation."
       fi
+      run_terraform
+      run_ansible
       ;;
     -h|--help|help)
       usage
