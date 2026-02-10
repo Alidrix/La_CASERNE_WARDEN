@@ -7,7 +7,7 @@ ANSIBLE_DIR="${ROOT_DIR}/ansible"
 INVENTORY_FILE="${INVENTORY_FILE:-${ROOT_DIR}/inventory.ini}"
 TFVARS_FILE="${TFVARS_FILE:-${TF_DIR}/terraform.tfvars}"
 
-# Exécution obligatoire via conteneurs
+# Exécution via conteneurs
 TERRAFORM_IMAGE="${TERRAFORM_IMAGE:-hashicorp/terraform:1.14.4}"
 ANSIBLE_IMAGE="${ANSIBLE_IMAGE:-cytopia/ansible:latest-tools}"
 
@@ -17,6 +17,9 @@ Usage: $0 [all|terraform|ansible|validate]
 
 Commands:
   validate   Vérifie les prérequis et la politique des identifiants BDD
+  terraform  Exécute terraform init/plan/apply (dans Docker)
+  ansible    Exécute les playbooks Ansible (dans Docker)
+  all        validate + terraform + ansible (défaut, saute les étapes si prérequis/fichiers absents)
   terraform  Exécute terraform init/plan/apply
   ansible    Exécute les playbooks Ansible dans l'ordre
   all        validate + terraform + ansible (défaut, saute les étapes si prérequis/fichiers absents)
@@ -45,6 +48,10 @@ require_cmd() {
   }
 }
 
+has_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
 check_password_complexity() {
   local pwd="$1"
 
@@ -69,7 +76,6 @@ validate_db_credentials_policy() {
   low_user="$(echo "$BW_DB_USER" | tr '[:upper:]' '[:lower:]')"
   low_pwd="$(echo "$BW_DB_PASSWORD" | tr '[:upper:]' '[:lower:]')"
 
-  # Valeurs par défaut/interdites courantes
   local -a forbidden_users=("sa" "admin" "bitwarden" "vault")
   local -a forbidden_passwords=("password" "password123" "changeme" "admin" "bitwarden" "vault" "sa")
 
@@ -88,7 +94,6 @@ validate_db_credentials_policy() {
   done
 
   check_password_complexity "$BW_DB_PASSWORD"
-
   echo "[OK] Politique identifiants BDD validée."
 }
 
@@ -175,8 +180,24 @@ run_ansible() {
     "$ANSIBLE_IMAGE" ansible-playbook -i "$INVENTORY_FILE" "$ANSIBLE_DIR/configure_proxy.yml"
 }
 
-has_cmd() {
-  command -v "$1" >/dev/null 2>&1
+run_all() {
+  run_validate
+
+  if ! has_cmd docker; then
+    echo "[WARN] docker absent: étape terraform ignorée. Utilisez ./scripts/run_lab.sh terraform après installation de Docker."
+  elif [[ ! -f "$TFVARS_FILE" ]]; then
+    echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (copiez terraform/terraform.tfvars.example vers terraform/terraform.tfvars, puis adaptez les valeurs)."
+  else
+    run_terraform
+  fi
+
+  if ! has_cmd docker; then
+    echo "[WARN] docker absent: étape ansible ignorée. Utilisez ./scripts/run_lab.sh ansible après installation de Docker."
+  elif [[ ! -f "$INVENTORY_FILE" ]]; then
+    echo "[WARN] inventory Ansible introuvable: ${INVENTORY_FILE}. Étape ansible ignorée (utilisez INVENTORY_FILE=/chemin/fichier ou créez le fichier)."
+  else
+    run_ansible
+  fi
 }
 
 main() {
@@ -195,6 +216,7 @@ main() {
       run_ansible
       ;;
     all)
+      run_all
       run_validate
 
       if ! has_cmd docker; then
