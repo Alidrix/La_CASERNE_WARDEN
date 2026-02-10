@@ -41,6 +41,7 @@ Dossier: `compose/`
   - `./scripts/run_lab.sh validate`
   - `./scripts/run_lab.sh all`
   - `TERRAFORM_IMAGE=hashicorp/terraform:1.14.4 ANSIBLE_IMAGE=cytopia/ansible:latest-tools ./scripts/run_lab.sh all`
+  - `TERRAFORM_IMAGE=hashicorp/terraform:1.9.8 ANSIBLE_IMAGE=cytopia/ansible:latest-tools ./scripts/run_lab.sh all`
 
 Le script applique une politique obligatoire sur les identifiants BDD:
 - interdiction des valeurs par défaut (ex: `sa`, `admin`, `password`, `changeme`),
@@ -69,6 +70,12 @@ Vérifier la version effective du script:
 ```bash
 grep -n "TERRAFORM_IMAGE" scripts/run_lab.sh
 ```
+- Terraform: `hashicorp/terraform:1.9.8`
+- Ansible: `cytopia/ansible:latest-tools`
+Si Terraform n'est pas encore installé:
+- lance d'abord `./scripts/run_lab.sh validate`
+- ou `./scripts/run_lab.sh ansible` si l'inventaire est prêt
+- la commande `./scripts/run_lab.sh all` saute maintenant automatiquement les étapes dont le binaire est absent.
 
 
 1. Préparer une image cloud Ubuntu 22.04 (ou Debian 12) et la variable `base_image_path`.
