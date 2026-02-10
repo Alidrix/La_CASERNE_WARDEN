@@ -10,6 +10,7 @@ TFVARS_FILE="${TFVARS_FILE:-${TF_DIR}/terraform.tfvars}"
 # Exécution via conteneurs
 TERRAFORM_IMAGE="${TERRAFORM_IMAGE:-hashicorp/terraform:1.14.4}"
 ANSIBLE_IMAGE="${ANSIBLE_IMAGE:-cytopia/ansible:latest-tools}"
+LIBVIRT_SOCK="${LIBVIRT_SOCK:-/var/run/libvirt/libvirt-sock}"
 
 usage() {
   cat <<USAGE
@@ -34,6 +35,7 @@ Variables optionnelles:
   TFVARS_FILE=/chemin/terraform.tfvars
   TERRAFORM_IMAGE=hashicorp/terraform:1.14.4
   ANSIBLE_IMAGE=cytopia/ansible:latest-tools
+  LIBVIRT_SOCK=/var/run/libvirt/libvirt-sock
 
 Fichiers attendus:
   ${ROOT_DIR}/terraform/terraform.tfvars (ou TFVARS_FILE=/chemin/fichier)
@@ -50,6 +52,18 @@ require_cmd() {
 
 has_cmd() {
   command -v "$1" >/dev/null 2>&1
+}
+
+has_libvirt_socket() {
+  [[ -S "$LIBVIRT_SOCK" ]]
+}
+
+require_libvirt_socket() {
+  has_libvirt_socket || {
+    echo "[ERREUR] Socket libvirt introuvable: ${LIBVIRT_SOCK}." >&2
+    echo "         Démarrez libvirtd/virtqemud ou définissez LIBVIRT_SOCK vers un socket valide." >&2
+    exit 1
+  }
 }
 
 check_password_complexity() {
@@ -131,24 +145,31 @@ PY
 
 run_terraform() {
   require_cmd docker
+  require_libvirt_socket
   [[ -f "$TFVARS_FILE" ]] || {
     echo "[ERREUR] terraform.tfvars introuvable: $TFVARS_FILE" >&2
     exit 1
   }
 
+  local libvirt_sock_dir
+  libvirt_sock_dir="$(dirname "$LIBVIRT_SOCK")"
+
   echo "[INFO] Terraform via Docker image: ${TERRAFORM_IMAGE}"
   docker run --rm -it \
     -v "${TF_DIR}:/workspace" \
+    -v "${libvirt_sock_dir}:${libvirt_sock_dir}" \
     -w /workspace \
     "$TERRAFORM_IMAGE" init
 
   docker run --rm -it \
     -v "${TF_DIR}:/workspace" \
+    -v "${libvirt_sock_dir}:${libvirt_sock_dir}" \
     -w /workspace \
     "$TERRAFORM_IMAGE" plan -var-file="$(basename "$TFVARS_FILE")"
 
   docker run --rm -it \
     -v "${TF_DIR}:/workspace" \
+    -v "${libvirt_sock_dir}:${libvirt_sock_dir}" \
     -w /workspace \
     "$TERRAFORM_IMAGE" apply -auto-approve -var-file="$(basename "$TFVARS_FILE")"
 }
@@ -190,6 +211,9 @@ run_all() {
     echo "[WARN] docker absent: étape terraform ignorée. Utilisez ./scripts/run_lab.sh terraform après installation de Docker."
   elif [[ ! -f "$TFVARS_FILE" ]]; then
     echo "[WARN] terraform.tfvars introuvable: ${TFVARS_FILE}. Étape terraform ignorée (copiez terraform/terraform.tfvars.example vers terraform/terraform.tfvars, puis adaptez les valeurs)."
+  elif ! has_libvirt_socket; then
+    echo "[WARN] Socket libvirt introuvable (${LIBVIRT_SOCK}): étape terraform ignorée."
+    echo "       Démarrez libvirtd/virtqemud ou définissez LIBVIRT_SOCK vers un socket valide."
   else
     run_terraform
   fi
