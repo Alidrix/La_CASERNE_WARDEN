@@ -1,0 +1,134 @@
+---
+- name: Configure MSSQL replicated topology for Bitwarden lab
+  hosts: mssql_nodes
+  become: true
+  vars:
+    mssql_sa_password: "{{ vault_mssql_sa_password }}"
+    mssql_image: "mcr.microsoft.com/mssql/server:2022-latest"
+    mssql_data_dir: "/srv/mssql"
+    mssql_compose_dir: "/opt/mssql"
+    mssql_ag_name: "BWAG"
+    mssql_db_name: "vault"
+  tasks:
+
+    - name: Enforce SA password policy (non default + complex)
+      ansible.builtin.assert:
+        that:
+          - vault_mssql_sa_password is defined
+          - (vault_mssql_sa_password | lower) not in ['password', 'password123', 'changeme', 'admin', 'bitwarden', 'vault', 'sa']
+          - (vault_mssql_sa_password | length) >= 12
+          - vault_mssql_sa_password is regex('.*[A-Z].*')
+          - vault_mssql_sa_password is regex('.*[a-z].*')
+          - vault_mssql_sa_password is regex('.*[0-9].*')
+          - vault_mssql_sa_password is regex('.*[^A-Za-z0-9].*')
+        fail_msg: >-
+          Mot de passe SA MSSQL invalide: pas de valeur par défaut,
+          min 12 caractères, complexe (maj/min/chiffre/spécial).
+    - name: Create MSSQL folders
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ mssql_data_dir }}"
+        - "{{ mssql_compose_dir }}"
+
+    - name: Deploy MSSQL compose file (per node)
+      ansible.builtin.copy:
+        dest: "{{ mssql_compose_dir }}/docker-compose.yml"
+        mode: "0644"
+        content: |
+          services:
+            mssql:
+              image: {{ mssql_image }}
+              container_name: mssql
+              restart: unless-stopped
+              environment:
+                ACCEPT_EULA: "Y"
+                MSSQL_SA_PASSWORD: "{{ mssql_sa_password }}"
+                MSSQL_PID: "Developer"
+              ports:
+                - "1433:1433"
+              volumes:
+                - {{ mssql_data_dir }}:/var/opt/mssql
+
+    - name: Start MSSQL containers
+      community.docker.docker_compose_v2:
+        project_src: "{{ mssql_compose_dir }}"
+        state: present
+
+    - name: Wait for SQL readiness
+      ansible.builtin.command:
+        cmd: >-
+          docker exec mssql /opt/mssql-tools18/bin/sqlcmd
+          -S localhost -U sa -P "{{ mssql_sa_password }}"
+          -C -Q "SELECT @@VERSION"
+      register: sql_up
+      retries: 20
+      delay: 10
+      until: sql_up.rc == 0
+      changed_when: false
+
+    - name: Create Bitwarden database (idempotent)
+      ansible.builtin.command:
+        cmd: >-
+          docker exec mssql /opt/mssql-tools18/bin/sqlcmd
+          -S localhost -U sa -P "{{ mssql_sa_password }}"
+          -C -Q "IF DB_ID('{{ mssql_db_name }}') IS NULL CREATE DATABASE [{{ mssql_db_name }}];"
+      changed_when: false
+
+- name: Bootstrap simple AG script artifacts (manual finalization in lab)
+  hosts: mssql_primary
+  become: true
+  vars:
+    ag_script_path: /opt/mssql/setup_alwayson_ag.sql
+    mssql_ag_name: "BWAG"
+    mssql_db_name: "vault"
+    listener_name: "bw-sql-listener"
+  tasks:
+    - name: Write SQL template for AlwaysOn AG
+      ansible.builtin.copy:
+        dest: "{{ ag_script_path }}"
+        mode: "0644"
+        content: |
+          -- Template lab SQL: adapter aux noms de nœuds et endpoints.
+          -- 1) Activer AlwaysOn dans mssql.conf puis redémarrer chaque nœud.
+          -- 2) Créer endpoint HADR sur chaque replica.
+          -- 3) Effectuer backup full + log de [{{ mssql_db_name }}].
+          -- 4) Restaurer WITH NORECOVERY sur replicas secondaires.
+          -- 5) Créer AG et listener.
+
+          -- Exemple (à compléter selon nœuds):
+          -- CREATE AVAILABILITY GROUP [{{ mssql_ag_name }}]
+          -- FOR DATABASE [{{ mssql_db_name }}]
+          -- REPLICA ON
+          -- N'mssql-primary' WITH (...),
+          -- N'mssql-secondary' WITH (...),
+          -- N'mssql-relay' WITH (...);
+
+          -- ALTER AVAILABILITY GROUP [{{ mssql_ag_name }}]
+          -- ADD LISTENER N'{{ listener_name }}' (
+          --   WITH IP ((N'10.30.0.20', N'255.255.255.0')),
+          --   PORT=1433
+          -- );
+
+    - name: Install backup script for /bwdata + SQL backups
+      ansible.builtin.copy:
+        dest: /usr/local/bin/bw-backup.sh
+        mode: "0755"
+        content: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          BACKUP_ROOT=/var/backups/bitwarden
+          mkdir -p "${BACKUP_ROOT}"
+          TS="$(date +%F_%H%M%S)"
+          tar -czf "${BACKUP_ROOT}/bwdata_${TS}.tgz" /bwdata
+          docker exec mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "{{ vault_mssql_sa_password }}" -C \
+            -Q "BACKUP DATABASE [vault] TO DISK='/var/opt/mssql/backup/vault_${TS}.bak' WITH INIT"
+
+    - name: Add nightly backup cron
+      ansible.builtin.cron:
+        name: "Nightly Bitwarden + MSSQL backup"
+        job: "/usr/local/bin/bw-backup.sh"
+        minute: "15"
+        hour: "2"

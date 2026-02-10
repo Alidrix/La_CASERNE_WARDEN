@@ -1,0 +1,108 @@
+---
+- name: Deploy Bitwarden self-host stack via Docker Compose templates
+  hosts: bitwarden_nodes
+  become: true
+  vars:
+    bw_install_dir: /opt/bitwarden
+    bw_data_dir: /bwdata
+    compose_source_file: "{{ hostvars[inventory_hostname].compose_template }}"
+  tasks:
+
+    - name: Enforce DB credential policy (non default + complex)
+      ansible.builtin.assert:
+        that:
+          - bw_db_user is defined
+          - bw_db_password is defined
+          - (bw_db_user | lower) not in ['sa', 'admin', 'bitwarden', 'vault']
+          - (bw_db_password | lower) not in ['password', 'password123', 'changeme', 'admin', 'bitwarden', 'vault', 'sa']
+          - (bw_db_password | length) >= 12
+          - bw_db_password is regex('.*[A-Z].*')
+          - bw_db_password is regex('.*[a-z].*')
+          - bw_db_password is regex('.*[0-9].*')
+          - bw_db_password is regex('.*[^A-Za-z0-9].*')
+        fail_msg: >-
+          Les identifiants BDD sont invalides: interdiction des valeurs par défaut,
+          mot de passe minimum 12 caractères, avec majuscule/minuscule/chiffre/spécial.
+    - name: Ensure Bitwarden directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ bw_install_dir }}"
+        - "{{ bw_data_dir }}"
+        - "{{ bw_data_dir }}/mssql"
+        - "{{ bw_data_dir }}/logs"
+
+    - name: Render environment file
+      ansible.builtin.copy:
+        dest: "{{ bw_install_dir }}/.env"
+        mode: "0640"
+        content: |
+          BW_DOMAIN={{ bw_domain }}
+          BW_SSL={{ bw_ssl_mode | default('selfsigned') }}
+          BW_DB_SERVER={{ bw_db_server }}
+          BW_DB_PORT={{ bw_db_port | default('1433') }}
+          BW_DB_NAME={{ bw_db_name | default('vault') }}
+          BW_DB_USER={{ bw_db_user }}
+          BW_DB_PASSWORD={{ bw_db_password }}
+          BW_INSTALLATION_ID={{ bw_installation_id }}
+          BW_INSTALLATION_KEY={{ bw_installation_key }}
+
+    - name: Deploy compose file
+      ansible.builtin.copy:
+        src: "../compose/{{ compose_source_file }}"
+        dest: "{{ bw_install_dir }}/docker-compose.yml"
+        mode: "0644"
+
+    - name: Start Bitwarden services
+      community.docker.docker_compose_v2:
+        project_src: "{{ bw_install_dir }}"
+        state: present
+
+    - name: Install automatic restart monitor script
+      ansible.builtin.copy:
+        dest: /usr/local/bin/bw-healthcheck-restart.sh
+        mode: "0755"
+        content: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cd {{ bw_install_dir }}
+          if ! docker compose ps --status running | grep -q "api"; then
+            docker compose up -d
+          fi
+
+    - name: Install systemd timer unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/bw-healthcheck-restart.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Bitwarden healthcheck + auto restart
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/bw-healthcheck-restart.sh
+
+    - name: Install timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/bw-healthcheck-restart.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Run Bitwarden healthcheck every 2 minutes
+
+          [Timer]
+          OnBootSec=90s
+          OnUnitActiveSec=2min
+          Unit=bw-healthcheck-restart.service
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Enable timer
+      ansible.builtin.systemd:
+        name: bw-healthcheck-restart.timer
+        enabled: true
+        state: started
+        daemon_reload: true

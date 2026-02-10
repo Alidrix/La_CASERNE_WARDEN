@@ -1,0 +1,91 @@
+---
+- name: Configure reverse proxy + TLS
+  hosts: reverse_proxy
+  become: true
+  vars:
+    proxy_impl: "nginx"
+    cert_mode: "selfsigned" # letsencrypt|selfsigned
+    bw_upstreams:
+      - { name: "primary", address: "10.30.0.11:80" }
+      - { name: "secondary", address: "10.30.0.12:80" }
+      - { name: "relay", address: "10.30.0.13:80" }
+  tasks:
+    - name: Install nginx + openssl + certbot
+      ansible.builtin.apt:
+        name:
+          - nginx
+          - openssl
+          - certbot
+          - python3-certbot-nginx
+        state: present
+        update_cache: true
+
+    - name: Create TLS directory
+      ansible.builtin.file:
+        path: /etc/nginx/tls
+        state: directory
+        mode: "0755"
+
+    - name: Create self-signed certificate for lab
+      ansible.builtin.command:
+        cmd: >-
+          openssl req -x509 -nodes -days 365
+          -newkey rsa:4096
+          -keyout /etc/nginx/tls/bitwarden.key
+          -out /etc/nginx/tls/bitwarden.crt
+          -subj "/CN={{ bitwarden_public_fqdn }}"
+      args:
+        creates: /etc/nginx/tls/bitwarden.crt
+      when: cert_mode == 'selfsigned'
+
+    - name: Configure nginx upstream and SSL vhost
+      ansible.builtin.copy:
+        dest: /etc/nginx/sites-available/bitwarden.conf
+        mode: "0644"
+        content: |
+          upstream bitwarden_backend {
+            least_conn;
+            {% for up in bw_upstreams %}
+            server {{ up.address }} max_fails=3 fail_timeout=5s;
+            {% endfor %}
+          }
+
+          server {
+            listen 443 ssl http2;
+            server_name {{ bitwarden_public_fqdn }};
+            ssl_certificate /etc/nginx/tls/bitwarden.crt;
+            ssl_certificate_key /etc/nginx/tls/bitwarden.key;
+
+            location / {
+              proxy_pass http://bitwarden_backend;
+              proxy_set_header Host $host;
+              proxy_set_header X-Forwarded-Proto https;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            }
+          }
+
+          server {
+            listen 80;
+            server_name {{ bitwarden_public_fqdn }};
+            return 301 https://$host$request_uri;
+          }
+
+    - name: Enable site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/bitwarden.conf
+        dest: /etc/nginx/sites-enabled/bitwarden.conf
+        state: link
+
+    - name: Disable default nginx site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Validate nginx config
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Reload nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
