@@ -58,6 +58,12 @@ export BW_DB_USER="SDIS28"
 export BW_DB_PASSWORD="fe2sBkCp+D1L*evX"
 ```
 
+```bash
+Installation ID: "67f9d478-4c54-412e-b0df-b3ed00e9a434"
+Installation Key: "RkwcvPRzOzpF5MnLLnSP"
+```
+
+
 Prérequis outillage local:
 - `docker` est obligatoire (Terraform et Ansible s'exécutent uniquement en conteneurs).
 - pas besoin d'installer `terraform` ni `ansible-playbook` sur l'hôte.
