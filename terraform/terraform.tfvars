@@ -32,7 +32,7 @@ relay_ip         = "10.30.0.13"
 primary_fqdn          = "bw-primary.lab.local"
 secondary_fqdn        = "bw-secondary.lab.local"
 relay_fqdn            = "bw-relay.lab.local"
-bitwarden_public_fqdn = "vault.lab.local"
+bitwarden_public_fqdn = "bitwarden.lab.local"
 
 vm_vcpu      = 4
 vm_memory_mb = 8192
