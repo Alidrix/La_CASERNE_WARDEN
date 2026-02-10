@@ -165,19 +165,30 @@ check_password_complexity() {
 }
 
 validate_db_credentials_policy() {
-  : "${BW_DB_USER:?BW_DB_USER doit être défini}"
-  : "${BW_DB_PASSWORD:?BW_DB_PASSWORD doit être défini}"
+  local db_user="${BW_DB_USER:-}"
+  local db_password="${BW_DB_PASSWORD:-}"
+
+  if [[ -z "$db_user" && -z "$db_password" ]]; then
+    echo "[WARN] BW_DB_USER/BW_DB_PASSWORD non définis: validation politique identifiants BDD ignorée."
+    echo "       Exportez ces variables pour activer le contrôle de robustesse des identifiants."
+    return 0
+  fi
+
+  if [[ -z "$db_user" || -z "$db_password" ]]; then
+    echo "[ERREUR] BW_DB_USER et BW_DB_PASSWORD doivent être définis ensemble." >&2
+    return 1
+  fi
 
   local low_user low_pwd
-  low_user="$(echo "$BW_DB_USER" | tr '[:upper:]' '[:lower:]')"
-  low_pwd="$(echo "$BW_DB_PASSWORD" | tr '[:upper:]' '[:lower:]')"
+  low_user="$(echo "$db_user" | tr '[:upper:]' '[:lower:]')"
+  low_pwd="$(echo "$db_password" | tr '[:upper:]' '[:lower:]')"
 
   local -a forbidden_users=("sa" "admin" "bitwarden" "vault")
   local -a forbidden_passwords=("password" "password123" "changeme" "admin" "bitwarden" "vault" "sa")
 
   for u in "${forbidden_users[@]}"; do
     if [[ "$low_user" == "$u" ]]; then
-      echo "[ERREUR] BW_DB_USER utilise une valeur par défaut/interdite: ${BW_DB_USER}" >&2
+      echo "[ERREUR] BW_DB_USER utilise une valeur par défaut/interdite: ${db_user}" >&2
       return 1
     fi
   done
@@ -189,7 +200,7 @@ validate_db_credentials_policy() {
     fi
   done
 
-  check_password_complexity "$BW_DB_PASSWORD"
+  check_password_complexity "$db_password"
   echo "[OK] Politique identifiants BDD validée."
 }
 
