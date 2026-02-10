@@ -34,6 +34,23 @@ Dossier: `compose/`
 
 ## 4) Instructions de déploiement
 
+### Lancement automatisé via script Bash
+
+- Script principal: `scripts/run_lab.sh`
+- Exemples:
+  - `./scripts/run_lab.sh validate`
+  - `./scripts/run_lab.sh all`
+
+Le script applique une politique obligatoire sur les identifiants BDD:
+- interdiction des valeurs par défaut (ex: `sa`, `admin`, `password`, `changeme`),
+- mot de passe **>= 12 caractères**,
+- au moins 1 majuscule, 1 minuscule, 1 chiffre, 1 caractère spécial.
+
+Variables à exporter avant exécution:
+- `BW_DB_USER`
+- `BW_DB_PASSWORD`
+
+
 1. Préparer une image cloud Ubuntu 22.04 (ou Debian 12) et la variable `base_image_path`.
 2. Créer un `terraform.tfvars` (clé SSH, CIDR, FQDN).
 3. Provisionner les VMs:

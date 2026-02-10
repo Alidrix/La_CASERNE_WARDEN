@@ -7,6 +7,22 @@
     bw_data_dir: /bwdata
     compose_source_file: "{{ hostvars[inventory_hostname].compose_template }}"
   tasks:
+
+    - name: Enforce DB credential policy (non default + complex)
+      ansible.builtin.assert:
+        that:
+          - bw_db_user is defined
+          - bw_db_password is defined
+          - (bw_db_user | lower) not in ['sa', 'admin', 'bitwarden', 'vault']
+          - (bw_db_password | lower) not in ['password', 'password123', 'changeme', 'admin', 'bitwarden', 'vault', 'sa']
+          - (bw_db_password | length) >= 12
+          - bw_db_password is regex('.*[A-Z].*')
+          - bw_db_password is regex('.*[a-z].*')
+          - bw_db_password is regex('.*[0-9].*')
+          - bw_db_password is regex('.*[^A-Za-z0-9].*')
+        fail_msg: >-
+          Les identifiants BDD sont invalides: interdiction des valeurs par défaut,
+          mot de passe minimum 12 caractères, avec majuscule/minuscule/chiffre/spécial.
     - name: Ensure Bitwarden directories exist
       ansible.builtin.file:
         path: "{{ item }}"

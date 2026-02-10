@@ -10,6 +10,20 @@
     mssql_ag_name: "BWAG"
     mssql_db_name: "vault"
   tasks:
+
+    - name: Enforce SA password policy (non default + complex)
+      ansible.builtin.assert:
+        that:
+          - vault_mssql_sa_password is defined
+          - (vault_mssql_sa_password | lower) not in ['password', 'password123', 'changeme', 'admin', 'bitwarden', 'vault', 'sa']
+          - (vault_mssql_sa_password | length) >= 12
+          - vault_mssql_sa_password is regex('.*[A-Z].*')
+          - vault_mssql_sa_password is regex('.*[a-z].*')
+          - vault_mssql_sa_password is regex('.*[0-9].*')
+          - vault_mssql_sa_password is regex('.*[^A-Za-z0-9].*')
+        fail_msg: >-
+          Mot de passe SA MSSQL invalide: pas de valeur par défaut,
+          min 12 caractères, complexe (maj/min/chiffre/spécial).
     - name: Create MSSQL folders
       ansible.builtin.file:
         path: "{{ item }}"
